@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>QuickDukan — Sign in</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: #0f1220; color: #eef1ff; padding: 24px;
+  }
+  .card {
+    width: 100%; max-width: 380px; background: #181c2f; border: 1px solid #2a3155;
+    border-radius: 16px; padding: 26px 22px; text-align: center;
+  }
+  h1 { font-size: 1.25rem; margin: 0 0 4px; }
+  .sub { color: #9aa3c7; font-size: .85rem; margin: 0 0 22px; }
+  .btn {
+    width: 100%; display: flex; align-items: center; justify-content: center; gap: 10px;
+    padding: 12px 14px; margin-bottom: 12px; border-radius: 10px; border: 1px solid #2a3155;
+    background: #1f2540; color: #eef1ff; font-size: .95rem; font-weight: 600; cursor: pointer;
+  }
+  .btn:hover { border-color: #6c8cff; }
+  .btn[disabled] { opacity: .5; cursor: default; }
+  #googleBtnWrap { display: flex; justify-content: center; margin-bottom: 12px; }
+  #status { min-height: 18px; font-size: .85rem; color: #9aa3c7; margin-top: 8px; }
+  .err { color: #ff8f8f; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>QuickDukan</h1>
+  <p class="sub">Sign in to continue</p>
+
+  <!-- Google Identity Services renders here -->
+  <div id="googleBtnWrap"></div>
+
+  <button class="btn" id="btnFacebook">Continue with Facebook</button>
+
+  <!-- Telegram Login Widget renders here -->
+  <div id="telegramWrap"></div>
+
+  <div id="status"></div>
+</div>
+
+<script>
+  // ============================================================
+  // CONFIG — fill these three PUBLIC values, then host this file.
+  // (Client ID / App ID / bot username are public, not secrets.)
+  // ============================================================
+  var CONFIG = {
+    GOOGLE_CLIENT_ID: 'YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com',
+    FACEBOOK_APP_ID: 'YOUR_FACEBOOK_APP_ID',
+    TELEGRAM_BOT_USERNAME: 'YOUR_BOT_USERNAME',
+    APP_SCHEME: 'quickdukan',
+    // Facebook Graph API version
+    FB_VERSION: 'v19.0'
+  };
+
+  var statusEl = document.getElementById('status');
+  function setStatus(msg, isErr) {
+    statusEl.textContent = msg || '';
+    statusEl.className = isErr ? 'err' : '';
+  }
+
+  // Deep-link the verified provider data back into the Android app.
+  function backToApp(provider, params) {
+    var q = new URLSearchParams(params);
+    var url = CONFIG.APP_SCHEME + '://social?provider=' + encodeURIComponent(provider) + '&' + q.toString();
+    setStatus('Signing in…');
+    window.location.href = url;
+  }
+
+  // ---------- Telegram return ----------
+  // Telegram redirects back to this page with id/hash/auth_date params.
+  (function handleTelegramReturn() {
+    var p = new URLSearchParams(window.location.search);
+    if (p.has('hash') && p.has('id') && p.has('auth_date')) {
+      var obj = {};
+      p.forEach(function (v, k) { obj[k] = v; });
+      backToApp('telegram', { telegramData: JSON.stringify(obj) });
+    }
+  })();
+
+  // ---------- Google (Identity Services) ----------
+  window.handleGoogleCredential = function (response) {
+    if (response && response.credential) {
+      backToApp('google', { idToken: response.credential });
+    } else {
+      setStatus('Google sign-in failed', true);
+    }
+  };
+
+  (function initGoogle() {
+    if (!CONFIG.GOOGLE_CLIENT_ID || CONFIG.GOOGLE_CLIENT_ID.indexOf('YOUR_') === 0) {
+      setStatus('Google not configured', true);
+      return;
+    }
+    var s = document.createElement('script');
+    s.src = 'https://accounts.google.com/gsi/client';
+    s.async = true;
+    s.defer = true;
+    s.onload = function () {
+      try {
+        google.accounts.id.initialize({
+          client_id: CONFIG.GOOGLE_CLIENT_ID,
+          callback: window.handleGoogleCredential
+        });
+        google.accounts.id.renderButton(document.getElementById('googleBtnWrap'), {
+          theme: 'filled_black', size: 'large', shape: 'pill', text: 'continue_with', width: 320
+        });
+      } catch (e) { setStatus('Google init failed', true); }
+    };
+    s.onerror = function () { setStatus('Google script load failed', true); };
+    document.head.appendChild(s);
+  })();
+
+  // ---------- Facebook ----------
+  (function initFacebook() {
+    var btn = document.getElementById('btnFacebook');
+    btn.addEventListener('click', function () {
+      if (!CONFIG.FACEBOOK_APP_ID || CONFIG.FACEBOOK_APP_ID.indexOf('YOUR_') === 0) {
+        setStatus('Facebook not configured', true); return;
+      }
+      setStatus('Opening Facebook…');
+      loadFacebookSdk(function () {
+        FB.login(function (resp) {
+          if (resp && resp.authResponse && resp.authResponse.accessToken) {
+            backToApp('facebook', { accessToken: resp.authResponse.accessToken });
+          } else {
+            setStatus('Facebook sign-in cancelled', true);
+          }
+        }, { scope: 'email,public_profile' });
+      });
+    });
+
+    function loadFacebookSdk(cb) {
+      if (window.FB) { cb(); return; }
+      window.fbAsyncInit = function () {
+        FB.init({ appId: CONFIG.FACEBOOK_APP_ID, cookie: true, xfbml: false, version: CONFIG.FB_VERSION });
+        cb();
+      };
+      var js = document.createElement('script');
+      js.src = 'https://connect.facebook.net/en_US/sdk.js';
+      js.async = true; js.defer = true; js.crossOrigin = 'anonymous';
+      document.head.appendChild(js);
+    }
+  })();
+
+  // ---------- Telegram widget ----------
+  (function initTelegram() {
+    if (!CONFIG.TELEGRAM_BOT_USERNAME || CONFIG.TELEGRAM_BOT_USERNAME.indexOf('YOUR_') === 0) {
+      return; // widget hidden until configured
+    }
+    var wrap = document.getElementById('telegramWrap');
+    var s = document.createElement('script');
+    s.async = true;
+    s.src = 'https://telegram.org/js/telegram-widget.js?22';
+    s.setAttribute('data-telegram-login', CONFIG.TELEGRAM_BOT_USERNAME);
+    s.setAttribute('data-size', 'large');
+    s.setAttribute('data-radius', '10');
+    s.setAttribute('data-request-access', 'write');
+    // Telegram redirects back HERE with the signed auth data
+    s.setAttribute('data-auth-url', window.location.origin + window.location.pathname);
+    wrap.appendChild(s);
+  })();
+</script>
+</body>
+</html>
